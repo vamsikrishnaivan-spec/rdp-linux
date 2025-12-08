@@ -9,40 +9,30 @@ jobs:
     timeout-minutes: 3600
 
     steps:
-      - name: Disable snapd (fix Firefox freeze)
+      - name: Disable snapd
         run: |
-          sudo systemctl stop snapd.socket snapd.service snapd.seeded.service || true
-          sudo systemctl disable snapd.socket snapd.service snapd.seeded.service || true
+          sudo systemctl stop snapd.service snapd.socket || true
           sudo apt-get purge -y snapd || true
-          sudo rm -rf ~/snap /snap /var/snap /var/lib/snapd
+          sudo rm -rf /snap /var/snap /var/lib/snapd || true
 
-      - name: Update packages
+      - name: Install minimal XFCE + XRDP
         run: |
           sudo apt-get update -y
-          sudo apt-get install -y software-properties-common
-
-      - name: Install Xfce + XRDP (minimal desktop, fast)
-        run: |
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
-            xfce4 xfce4-session xfce4-goodies xorg dbus-x11 xrdp
+            xfce4-session xfwm4 xfdesktop4 xfce4-panel xfce4-terminal \
+            xorg xrdp
 
-          sudo sed -i 's|console|anybody|g' /etc/X11/Xwrapper.config || true
-          sudo sed -i 's|startlxqt|startxfce4|g' /etc/xrdp/startwm.sh || true
           echo "startxfce4" | sudo tee /etc/skel/.xsession
-
           sudo systemctl enable xrdp --now
 
       - name: Create RDP user
         run: |
           USER=rdp
-          PASSWORD=$(openssl rand -base64 20)
-
+          PASS=$(openssl rand -base64 16)
           sudo useradd -m -s /bin/bash $USER
-          echo "$USER:$PASSWORD" | sudo chpasswd
-          sudo usermod -aG sudo $USER
-
+          echo "$USER:$PASS" | sudo chpasswd
           echo "RDP_USER=$USER" >> $GITHUB_ENV
-          echo "RDP_PASSWORD=$PASSWORD" >> $GITHUB_ENV
+          echo "RDP_PASS=$PASS" >> $GITHUB_ENV
 
       - name: Install Tailscale
         run: |
@@ -50,30 +40,22 @@ jobs:
 
       - name: Start Tailscale
         env:
-          AUTH: ${{ secrets.TAILSCALE_AUTH_KEY }}
+          KEY: ${{ secrets.TAILSCALE_AUTH_KEY }}
         run: |
-          sudo tailscale up --authkey=$AUTH --hostname="ubuntu-rdp-${GITHUB_RUN_ID}"
+          sudo tailscale up --authkey=$KEY --hostname="ubuntu-rdp-${GITHUB_RUN_ID}"
+          echo "TS_IP=$(tailscale ip -4 | head -n 1)" >> $GITHUB_ENV
 
-          TSIP=$(tailscale ip -4 | head -n 1)
-          echo "TS_IP=$TSIP" >> $GITHUB_ENV
-
-      - name: Verify RDP port
+      - name: Connection Details
         run: |
-          sudo ss -ltn | grep ":3389" || (echo "XRDP not running!" && exit 1)
+          echo "===== RDP INFO ====="
+          echo "IP: $TS_IP"
+          echo "User: $RDP_USER"
+          echo "Pass: $RDP_PASS"
+          echo "===================="
 
-      - name: Show connection details
+      - name: Keep Alive
         run: |
-          echo "======== RDP ACCESS ========"
-          echo "Tailscale IP: $TS_IP"
-          echo "Username: $RDP_USER"
-          echo "Password: $RDP_PASSWORD"
-          echo "Port: 3389"
-          echo "============================"
-
-      - name: Keep VM alive
-        run: |
-          echo "RDP session running. Do NOT close this job."
           while true; do
-            echo "Alive at: $(date)"
+            echo "Alive at $(date)"
             sleep 120
           done
