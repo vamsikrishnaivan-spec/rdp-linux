@@ -1,61 +1,68 @@
-name: Ubuntu-RDP
+name: Linux-VNC
 
 on:
   workflow_dispatch:
 
 jobs:
-  rdp:
+  vnc-linux:
     runs-on: ubuntu-latest
     timeout-minutes: 3600
 
     steps:
-      - name: Disable snapd
+      - name: Install XFCE + VNC
         run: |
-          sudo systemctl stop snapd.service snapd.socket || true
-          sudo apt-get purge -y snapd || true
-          sudo rm -rf /snap /var/snap /var/lib/snapd || true
+          sudo apt update -y
+          sudo apt install -y xfce4 xfce4-goodies tigervnc-standalone-server tigervnc-common dbus-x11
 
-      - name: Install minimal XFCE + XRDP
+      - name: Create VNC user and password
         run: |
-          sudo apt-get update -y
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
-            xfce4-session xfwm4 xfdesktop4 xfce4-panel xfce4-terminal \
-            xorg xrdp
+          pw=$(tr -dc 'A-Za-z0-9!@#$%^&*' < /dev/urandom | head -c 12)
 
-          echo "startxfce4" | sudo tee /etc/skel/.xsession
-          sudo systemctl enable xrdp --now
+          sudo useradd -m -s /bin/bash vncuser || true
+          echo "vncuser:$pw" | sudo chpasswd
+          sudo usermod -aG sudo vncuser
 
-      - name: Create RDP user
+          echo "VNC_PASS=$pw" >> $GITHUB_ENV
+          echo "VNC_USER=vncuser" >> $GITHUB_ENV
+
+          sudo -u vncuser mkdir -p /home/vncuser/.vnc
+          printf "%s" "$pw" | vncpasswd -f | sudo tee /home/vncuser/.vnc/passwd >/dev/null
+          sudo chmod 600 /home/vncuser/.vnc/passwd
+          sudo chown vncuser:vncuser /home/vncuser/.vnc/passwd
+
+          echo "#!/bin/bash" | sudo tee /home/vncuser/.vnc/xstartup > /dev/null
+          echo "xrdb \$HOME/.Xresources" | sudo tee -a /home/vncuser/.vnc/xstartup > /dev/null
+          echo "startxfce4 &" | sudo tee -a /home/vncuser/.vnc/xstartup > /dev/null
+          sudo chmod +x /home/vncuser/.vnc/xstartup
+          sudo chown vncuser:vncuser /home/vncuser/.vnc/xstartup
+
+      - name: Start VNC Server
         run: |
-          USER=rdp
-          PASS=$(openssl rand -base64 16)
-          sudo useradd -m -s /bin/bash $USER
-          echo "$USER:$PASS" | sudo chpasswd
-          echo "RDP_USER=$USER" >> $GITHUB_ENV
-          echo "RDP_PASS=$PASS" >> $GITHUB_ENV
+          sudo -u vncuser vncserver :1 -geometry 1280x720 -depth 24
 
       - name: Install Tailscale
         run: |
-          curl -fsSL https://tailscale.com/install.sh | sudo sh
+          curl -fsSL https://tailscale.com/install.sh | sh
 
       - name: Start Tailscale
         env:
-          KEY: ${{ secrets.TAILSCALE_AUTH_KEY }}
+          AUTH: ${{ secrets.TAILSCALE_AUTH_KEY }}
         run: |
-          sudo tailscale up --authkey=$KEY --hostname="ubuntu-rdp-${GITHUB_RUN_ID}"
-          echo "TS_IP=$(tailscale ip -4 | head -n 1)" >> $GITHUB_ENV
+          sudo tailscale up --authkey="$AUTH" --hostname="vnc-linux-${{ github.run_id }}"
+          ip=$(tailscale ip -4)
+          echo "TAILSCALE_IP=$ip" >> $GITHUB_ENV
 
-      - name: Connection Details
+      - name: Show VNC Connection Info
         run: |
-          echo "===== RDP INFO ====="
-          echo "IP: $TS_IP"
-          echo "User: $RDP_USER"
-          echo "Pass: $RDP_PASS"
-          echo "===================="
+          echo "==================== VNC ACCESS ===================="
+          echo "IP Address : $TAILSCALE_IP:5901"
+          echo "User       : $VNC_USER"
+          echo "Password   : $VNC_PASS"
+          echo "===================================================="
 
       - name: Keep Alive
         run: |
           while true; do
-            echo "Alive at $(date)"
-            sleep 120
+            echo "[$(date)] VNC Running..."
+            sleep 300
           done
