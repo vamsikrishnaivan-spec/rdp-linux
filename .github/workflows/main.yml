@@ -1,4 +1,4 @@
-name: Ubuntu-noVNC
+name: Ubuntu-noVNC-Fixed
 
 on:
   workflow_dispatch:
@@ -9,40 +9,49 @@ jobs:
     timeout-minutes: 3600
 
     steps:
-      - name: Create VNC user + password
+      - name: Create VNC User + Password
         run: |
           sudo useradd -m vncuser || true
           pw=$(openssl rand -base64 12)
           echo "vncuser:$pw" | sudo chpasswd
           echo "VNC_PASSWORD=$pw" >> $GITHUB_ENV
 
-      - name: Install Desktop + VNC components
+      - name: Install XFCE + VNC + noVNC
         run: |
           sudo apt update
-          sudo apt install -y xfce4 xfce4-goodies x11vnc xvfb git python3-websockify dbus-x11
+          sudo apt install -y \
+            xfce4 xfce4-session xfce4-goodies \
+            x11vnc xvfb dbus-x11 \
+            git python3-websockify
 
           sudo -u vncuser mkdir -p /home/vncuser/.vnc
           sudo -u vncuser x11vnc -storepasswd $VNC_PASSWORD /home/vncuser/.vnc/passwd
-          sudo chmod 600 /home/vncuser/.vnc/passwd
 
           git clone https://github.com/novnc/noVNC.git
           git clone https://github.com/novnc/websockify.git noVNC/utils/websockify
 
       - name: Start Xvfb virtual display
         run: |
-          sudo -u vncuser Xvfb :1 -screen 0 1280x720x24 -nolisten tcp &
-          sleep 3
-          
-          # Verify Xvfb
-          pgrep Xvfb || (echo "Xvfb failed" && exit 1)
+          sudo -u vncuser Xvfb :1 -screen 0 1280x720x24 -ac &
+          sleep 2
 
-      - name: Start XFCE desktop environment
+      - name: Start DBus + XFCE (Corrected)
         run: |
           export DISPLAY=:1
-          sudo -u vncuser dbus-launch --exit-with-session xfce4-session &
-          sleep 5
+          
+          # Required env vars (fixes failsafe session)
+          export XDG_CONFIG_DIRS=/etc/xdg
+          export XDG_DATA_DIRS=/usr/share:/usr/local/share:/usr/share
+          export XDG_RUNTIME_DIR=/run/user/$(id -u vncuser)
+          
+          sudo mkdir -p $XDG_RUNTIME_DIR
+          sudo chown vncuser:vncuser $XDG_RUNTIME_DIR
+          sudo chmod 700 $XDG_RUNTIME_DIR
 
-      - name: Start x11vnc
+          sudo -u vncuser dbus-launch --exit-with-session xfce4-session &
+          sleep 4
+
+      - name: Start VNC Server
         run: |
           export DISPLAY=:1
           sudo -u vncuser x11vnc \
@@ -53,7 +62,7 @@ jobs:
             -rfbport 5901 &
           sleep 3
 
-      - name: Start noVNC web server
+      - name: Start noVNC
         run: |
           cd noVNC
           ./utils/novnc_proxy --vnc localhost:5901 --listen 6080 &
@@ -65,24 +74,21 @@ jobs:
 
       - name: Connect to Tailscale
         run: |
-          sudo tailscale up \
-            --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} \
-            --hostname=ubuntu-novnc-${{ github.run_id }}
-          sleep 5
+          sudo tailscale up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }}
           TS_IP=$(tailscale ip -4)
           echo "TS_IP=$TS_IP" >> $GITHUB_ENV
 
       - name: Show Connection Info
         run: |
-          echo "===================================="
-          echo " UBUNTU DESKTOP READY (XFCE + noVNC)"
-          echo "===================================="
-          echo "Open in browser:"
+          echo "==========================================="
+          echo " UBUNTU DESKTOP (XFCE + noVNC) IS READY"
+          echo "==========================================="
+          echo "Open in your browser (via Tailscale):"
           echo "  http://$TS_IP:6080/vnc.html"
           echo ""
           echo "Password: $VNC_PASSWORD"
-          echo "===================================="
+          echo "==========================================="
 
-      - name: Keep Alive
+      - name: Keep session alive
         run: |
           while true; do sleep 300; done
