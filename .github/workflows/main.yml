@@ -12,45 +12,51 @@ jobs:
       - name: Create VNC User + Password
         run: |
           sudo useradd -m vncuser || true
-          pw=$(openssl rand -base64 14)
+          
+          pw=$(openssl rand -base64 12)
           echo "vncuser:$pw" | sudo chpasswd
+          
           echo "VNC_PASSWORD=$pw" >> $GITHUB_ENV
+          echo "Created VNC user with password: $pw"
 
-      - name: Install Desktop + x11vnc + noVNC
+      - name: Install XFCE Desktop + x11vnc + noVNC
         run: |
           sudo apt update
-          sudo apt install -y xfce4 xfce4-goodies x11vnc xvfb git python3-websockify
-
-          # Setup VNC password file
-          sudo -u vncuser mkdir -p /home/vncuser/.vnc
-          x11vnc -storepasswd $VNC_PASSWORD /home/vncuser/.vnc/passwd
+          sudo apt install -y xfce4 xfce4-goodies x11vnc xvfb git python3-websockify dbus-x11
           
-          # Clone noVNC
+          # Create VNC password file properly
+          sudo -u vncuser mkdir -p /home/vncuser/.vnc
+          sudo -u vncuser x11vnc -storepasswd $VNC_PASSWORD /home/vncuser/.vnc/passwd
+          sudo chmod 600 /home/vncuser/.vnc/passwd
+
+          # Download noVNC + websockify
           git clone https://github.com/novnc/noVNC.git
           git clone https://github.com/novnc/websockify.git noVNC/utils/websockify
 
-      - name: Start X11 Virtual Display + Desktop
+      - name: Start Virtual Display + XFCE
         run: |
-          # Start virtual display
           sudo -u vncuser Xvfb :1 -screen 0 1280x720x16 &
-          sleep 2
-
-          # Start XFCE session
+          sleep 3
+          
+          # Start desktop session
           sudo -u vncuser startxfce4 &
           sleep 5
 
-      - name: Start x11vnc Server
+      - name: Start x11vnc Server (Password Fixed)
         run: |
-          sudo -u vncuser x11vnc -display :1 \
+          sudo -u vncuser x11vnc \
+            -display :1 \
             -rfbauth /home/vncuser/.vnc/passwd \
-            -nopw -forever -shared -rfbport 5901 &
+            -forever \
+            -shared \
+            -rfbport 5901 &
           sleep 3
 
-      - name: Start noVNC Web Server
+      - name: Start noVNC
         run: |
           cd noVNC
           ./utils/novnc_proxy --vnc localhost:5901 --listen 6080 &
-          sleep 5
+          sleep 3
 
       - name: Install Tailscale
         run: |
@@ -66,19 +72,20 @@ jobs:
           TS_IP=$(tailscale ip -4)
           echo "TS_IP=$TS_IP" >> $GITHUB_ENV
 
-      - name: Show noVNC Connection Info
+      - name: Show noVNC URL + Login Details
         run: |
-          echo "=========================================="
-          echo " UBUNTU DESKTOP VIA WEB BROWSER (noVNC)"
-          echo "=========================================="
-          echo "Open this URL inside your Tailscale network:"
+          echo "=============================================="
+          echo " UBUNTU DESKTOP (noVNC) READY"
+          echo "=============================================="
+          echo "Open this in your browser (inside Tailscale):"
+          echo ""
           echo "  http://$TS_IP:6080/vnc.html"
           echo ""
           echo "Login:"
-          echo "  User: vncuser"
           echo "  Password: $VNC_PASSWORD"
-          echo "=========================================="
+          echo "=============================================="
 
-      - name: Keep Alive
+      - name: Keep alive
         run: |
+          echo "noVNC running... Stop workflow to end session."
           while true; do sleep 300; done
