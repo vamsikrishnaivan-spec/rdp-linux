@@ -1,94 +1,80 @@
-name: Ubuntu-noVNC-Fixed
+name: Ubuntu-AnyDesk
 
 on:
   workflow_dispatch:
 
 jobs:
-  novnc-session:
+  anydesk-session:
     runs-on: ubuntu-latest
     timeout-minutes: 3600
 
     steps:
-      - name: Create VNC User + Password
+      - name: Create Desktop User + Password
         run: |
-          sudo useradd -m vncuser || true
-          pw=$(openssl rand -base64 12)
-          echo "vncuser:$pw" | sudo chpasswd
-          echo "VNC_PASSWORD=$pw" >> $GITHUB_ENV
+          sudo useradd -m desktop || true
+          pw=$(openssl rand -base64 10)
+          echo "desktop:$pw" | sudo chpasswd
+          echo "DESKTOP_PASSWORD=$pw" >> $GITHUB_ENV
 
-      - name: Install XFCE + VNC + noVNC
+      - name: Install XFCE + Xorg
         run: |
           sudo apt update
-          sudo apt install -y \
-            xfce4 xfce4-session xfce4-goodies \
-            x11vnc xvfb dbus-x11 \
-            git python3-websockify
+          sudo apt install -y xfce4 xfce4-goodies xorg dbus-x11
 
-          sudo -u vncuser mkdir -p /home/vncuser/.vnc
-          sudo -u vncuser x11vnc -storepasswd $VNC_PASSWORD /home/vncuser/.vnc/passwd
-
-          git clone https://github.com/novnc/noVNC.git
-          git clone https://github.com/novnc/websockify.git noVNC/utils/websockify
-
-      - name: Start Xvfb virtual display
+      - name: Start Xorg Display
         run: |
-          sudo -u vncuser Xvfb :1 -screen 0 1280x720x24 -ac &
-          sleep 2
+          sudo mkdir -p /tmp/.X11-unix
+          sudo chmod 1777 /tmp/.X11-unix
 
-      - name: Start DBus + XFCE (Corrected)
+          echo "Starting Xorg on :0"
+          sudo Xorg :0 -noreset +extension GLX +extension RANDR +extension RENDER vt1 &
+          sleep 5
+
+          export DISPLAY=:0
+          sudo -u desktop dbus-launch --exit-with-session xfce4-session &
+          sleep 8
+
+      - name: Install AnyDesk
         run: |
-          export DISPLAY=:1
-          
-          # Required env vars (fixes failsafe session)
-          export XDG_CONFIG_DIRS=/etc/xdg
-          export XDG_DATA_DIRS=/usr/share:/usr/local/share:/usr/share
-          export XDG_RUNTIME_DIR=/run/user/$(id -u vncuser)
-          
-          sudo mkdir -p $XDG_RUNTIME_DIR
-          sudo chown vncuser:vncuser $XDG_RUNTIME_DIR
-          sudo chmod 700 $XDG_RUNTIME_DIR
+          wget https://download.anydesk.com/linux/anydesk_6.3.0-1_amd64.deb
+          sudo dpkg -i anydesk_6.3.0-1_amd64.deb || sudo apt --fix-broken install -y
 
-          sudo -u vncuser dbus-launch --exit-with-session xfce4-session &
-          sleep 4
+          sudo systemctl enable anydesk
+          sudo systemctl start anydesk
 
-      - name: Start VNC Server
+          ANYDESK_ADDR=$(anydesk --get-id)
+          echo "ANYDESK_ADDR=$ANYDESK_ADDR" >> $GITHUB_ENV
+
+      - name: Set AnyDesk Password + Permissions
         run: |
-          export DISPLAY=:1
-          sudo -u vncuser x11vnc \
-            -display :1 \
-            -rfbauth /home/vncuser/.vnc/passwd \
-            -forever \
-            -shared \
-            -rfbport 5901 &
-          sleep 3
-
-      - name: Start noVNC
-        run: |
-          cd noVNC
-          ./utils/novnc_proxy --vnc localhost:5901 --listen 6080 &
-          sleep 3
+          echo "$DESKTOP_PASSWORD" | sudo anydesk --set-password
+          sudo anydesk --set-permission file_transfer:true
+          sudo anydesk --set-permission audio:true
+          sudo anydesk --set-permission clipboard:true
+          sudo anydesk --set-permission input_control:true
 
       - name: Install Tailscale
         run: |
           curl -fsSL https://tailscale.com/install.sh | sh
+          sudo tailscale up \
+            --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} \
+            --hostname=linux-anydesk-${{ github.run_id }}
 
-      - name: Connect to Tailscale
-        run: |
-          sudo tailscale up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }}
           TS_IP=$(tailscale ip -4)
           echo "TS_IP=$TS_IP" >> $GITHUB_ENV
 
       - name: Show Connection Info
         run: |
-          echo "==========================================="
-          echo " UBUNTU DESKTOP (XFCE + noVNC) IS READY"
-          echo "==========================================="
-          echo "Open in your browser (via Tailscale):"
-          echo "  http://$TS_IP:6080/vnc.html"
+          echo "======================================="
+          echo " UBUNTU + ANYDESK + XFCE READY"
+          echo "======================================="
+          echo "Tailscale IP: $TS_IP"
+          echo "Desktop User: desktop"
+          echo "Password: $DESKTOP_PASSWORD"
           echo ""
-          echo "Password: $VNC_PASSWORD"
-          echo "==========================================="
+          echo "AnyDesk Address: $ANYDESK_ADDR"
+          echo "AnyDesk Password: $DESKTOP_PASSWORD"
+          echo "======================================="
 
-      - name: Keep session alive
-        run: |
-          while true; do sleep 300; done
+      - name: Keep Alive
+        run: while true; do sleep 300; done
