@@ -16,13 +16,11 @@ jobs:
 
       - name: Download AnyDesk MSI
         run: |
-          Invoke-WebRequest "https://download.anydesk.com/AnyDesk.msi" -OutFile "AnyDesk.msi"
+          Invoke-WebRequest "https://download.anydesk.com/AnyDesk.msi?support=1" -OutFile "AnyDesk.msi"
 
-      - name: Install AnyDesk (FAST MSI Install)
+      - name: Install AnyDesk (FAST MSI Installation)
         run: |
-          Write-Host "Installing AnyDesk via MSI..."
           msiexec /i AnyDesk.msi /qn /norestart
-          Write-Host "AnyDesk Installed."
 
       - name: Start AnyDesk Service
         run: |
@@ -54,8 +52,6 @@ jobs:
           Write-Host "=========================================="
           Write-Host "AnyDesk ID       : $env:ANYDESK_ID"
           Write-Host "AnyDesk Password : $env:ANYDESK_PASSWORD"
-          Write-Host ""
-          Write-Host "You can now connect using AnyDesk."
           Write-Host "=========================================="
 
       - name: Keep Alive
