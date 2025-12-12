@@ -1,4 +1,4 @@
-name: Windows-AnyDesk
+name: Windows-AnyDesk-MSI
 
 on:
   workflow_dispatch:
@@ -9,54 +9,55 @@ jobs:
     timeout-minutes: 360
 
     steps:
-      - name: Set AnyDesk Password
-        id: pwd
+      - name: Generate AnyDesk Password
         run: |
           $pwd = -join (((48..57) + (65..90) + (97..122)) | Get-Random -Count 12 | % {[char]$_})
           echo "ANYDESK_PASSWORD=$pwd" >> $env:GITHUB_ENV
 
-      - name: Download AnyDesk
+      - name: Download AnyDesk MSI
         run: |
-          Invoke-WebRequest "https://download.anydesk.com/AnyDesk.exe" -OutFile "AnyDesk.exe"
+          Invoke-WebRequest "https://download.anydesk.com/AnyDesk.msi" -OutFile "AnyDesk.msi"
 
-      - name: Install AnyDesk (Silent)
+      - name: Install AnyDesk (FAST MSI Install)
         run: |
-          Start-Process ".\AnyDesk.exe" -ArgumentList "/install /silent" -Wait
+          Write-Host "Installing AnyDesk via MSI..."
+          msiexec /i AnyDesk.msi /qn /norestart
+          Write-Host "AnyDesk Installed."
 
       - name: Start AnyDesk Service
         run: |
           Start-Service AnyDesk
           Set-Service AnyDesk -StartupType Automatic
 
-      - name: Apply AnyDesk Password
+      - name: Set AnyDesk Password
         run: |
           & "C:\Program Files (x86)\AnyDesk\AnyDesk.exe" --set-password "$env:ANYDESK_PASSWORD"
 
-      - name: Allow Full Permissions
+      - name: Enable Full Permissions
         run: |
-          & "C:\Program Files (x86)\AnyDesk\AnyDesk.exe" --set-permission clipboard:true
           & "C:\Program Files (x86)\AnyDesk\AnyDesk.exe" --set-permission file_transfer:true
+          & "C:\Program Files (x86)\AnyDesk\AnyDesk.exe" --set-permission clipboard:true
           & "C:\Program Files (x86)\AnyDesk\AnyDesk.exe" --set-permission audio:true
           & "C:\Program Files (x86)\AnyDesk\AnyDesk.exe" --set-permission input_control:true
-          & "C:\Program Files (x86)\AnyDesk\AnyDesk.exe" --set-permission privacy_mode:false
           & "C:\Program Files (x86)\AnyDesk\AnyDesk.exe" --set-permission remote_restart:true
+          & "C:\Program Files (x86)\AnyDesk\AnyDesk.exe" --set-permission privacy_mode:false
 
-      - name: Get AnyDesk Address
+      - name: Get AnyDesk ID
         run: |
           $id = & "C:\Program Files (x86)\AnyDesk\AnyDesk.exe" --get-id
           echo "ANYDESK_ID=$id" >> $env:GITHUB_ENV
 
-      - name: Display Connection Info
+      - name: Show Connection Info
         run: |
-          Write-Host "========================================="
-          Write-Host " WINDOWS ANYDESK REMOTE DESKTOP READY"
-          Write-Host "========================================="
+          Write-Host "=========================================="
+          Write-Host " WINDOWS ANYDESK READY"
+          Write-Host "=========================================="
           Write-Host "AnyDesk ID       : $env:ANYDESK_ID"
           Write-Host "AnyDesk Password : $env:ANYDESK_PASSWORD"
           Write-Host ""
           Write-Host "You can now connect using AnyDesk."
-          Write-Host "========================================="
+          Write-Host "=========================================="
 
-      - name: Keep Runner Alive
+      - name: Keep Alive
         run: |
           while ($true) { Start-Sleep -Seconds 300 }
