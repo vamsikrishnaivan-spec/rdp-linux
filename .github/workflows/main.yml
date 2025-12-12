@@ -1,80 +1,62 @@
-name: Ubuntu-AnyDesk
+name: Windows-AnyDesk
 
 on:
   workflow_dispatch:
 
 jobs:
   anydesk-session:
-    runs-on: ubuntu-latest
-    timeout-minutes: 3600
+    runs-on: windows-latest
+    timeout-minutes: 360
 
     steps:
-      - name: Create Desktop User + Password
+      - name: Set AnyDesk Password
+        id: pwd
         run: |
-          sudo useradd -m desktop || true
-          pw=$(openssl rand -base64 10)
-          echo "desktop:$pw" | sudo chpasswd
-          echo "DESKTOP_PASSWORD=$pw" >> $GITHUB_ENV
+          $pwd = -join (((48..57) + (65..90) + (97..122)) | Get-Random -Count 12 | % {[char]$_})
+          echo "ANYDESK_PASSWORD=$pwd" >> $env:GITHUB_ENV
 
-      - name: Install XFCE + Xorg
+      - name: Download AnyDesk
         run: |
-          sudo apt update
-          sudo apt install -y xfce4 xfce4-goodies xorg dbus-x11
+          Invoke-WebRequest "https://download.anydesk.com/AnyDesk.exe" -OutFile "AnyDesk.exe"
 
-      - name: Start Xorg Display
+      - name: Install AnyDesk (Silent)
         run: |
-          sudo mkdir -p /tmp/.X11-unix
-          sudo chmod 1777 /tmp/.X11-unix
+          Start-Process ".\AnyDesk.exe" -ArgumentList "/install /silent" -Wait
 
-          echo "Starting Xorg on :0"
-          sudo Xorg :0 -noreset +extension GLX +extension RANDR +extension RENDER vt1 &
-          sleep 5
-
-          export DISPLAY=:0
-          sudo -u desktop dbus-launch --exit-with-session xfce4-session &
-          sleep 8
-
-      - name: Install AnyDesk
+      - name: Start AnyDesk Service
         run: |
-          wget https://download.anydesk.com/linux/anydesk_6.3.0-1_amd64.deb
-          sudo dpkg -i anydesk_6.3.0-1_amd64.deb || sudo apt --fix-broken install -y
+          Start-Service AnyDesk
+          Set-Service AnyDesk -StartupType Automatic
 
-          sudo systemctl enable anydesk
-          sudo systemctl start anydesk
-
-          ANYDESK_ADDR=$(anydesk --get-id)
-          echo "ANYDESK_ADDR=$ANYDESK_ADDR" >> $GITHUB_ENV
-
-      - name: Set AnyDesk Password + Permissions
+      - name: Apply AnyDesk Password
         run: |
-          echo "$DESKTOP_PASSWORD" | sudo anydesk --set-password
-          sudo anydesk --set-permission file_transfer:true
-          sudo anydesk --set-permission audio:true
-          sudo anydesk --set-permission clipboard:true
-          sudo anydesk --set-permission input_control:true
+          & "C:\Program Files (x86)\AnyDesk\AnyDesk.exe" --set-password "$env:ANYDESK_PASSWORD"
 
-      - name: Install Tailscale
+      - name: Allow Full Permissions
         run: |
-          curl -fsSL https://tailscale.com/install.sh | sh
-          sudo tailscale up \
-            --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} \
-            --hostname=linux-anydesk-${{ github.run_id }}
+          & "C:\Program Files (x86)\AnyDesk\AnyDesk.exe" --set-permission clipboard:true
+          & "C:\Program Files (x86)\AnyDesk\AnyDesk.exe" --set-permission file_transfer:true
+          & "C:\Program Files (x86)\AnyDesk\AnyDesk.exe" --set-permission audio:true
+          & "C:\Program Files (x86)\AnyDesk\AnyDesk.exe" --set-permission input_control:true
+          & "C:\Program Files (x86)\AnyDesk\AnyDesk.exe" --set-permission privacy_mode:false
+          & "C:\Program Files (x86)\AnyDesk\AnyDesk.exe" --set-permission remote_restart:true
 
-          TS_IP=$(tailscale ip -4)
-          echo "TS_IP=$TS_IP" >> $GITHUB_ENV
-
-      - name: Show Connection Info
+      - name: Get AnyDesk Address
         run: |
-          echo "======================================="
-          echo " UBUNTU + ANYDESK + XFCE READY"
-          echo "======================================="
-          echo "Tailscale IP: $TS_IP"
-          echo "Desktop User: desktop"
-          echo "Password: $DESKTOP_PASSWORD"
-          echo ""
-          echo "AnyDesk Address: $ANYDESK_ADDR"
-          echo "AnyDesk Password: $DESKTOP_PASSWORD"
-          echo "======================================="
+          $id = & "C:\Program Files (x86)\AnyDesk\AnyDesk.exe" --get-id
+          echo "ANYDESK_ID=$id" >> $env:GITHUB_ENV
 
-      - name: Keep Alive
-        run: while true; do sleep 300; done
+      - name: Display Connection Info
+        run: |
+          Write-Host "========================================="
+          Write-Host " WINDOWS ANYDESK REMOTE DESKTOP READY"
+          Write-Host "========================================="
+          Write-Host "AnyDesk ID       : $env:ANYDESK_ID"
+          Write-Host "AnyDesk Password : $env:ANYDESK_PASSWORD"
+          Write-Host ""
+          Write-Host "You can now connect using AnyDesk."
+          Write-Host "========================================="
+
+      - name: Keep Runner Alive
+        run: |
+          while ($true) { Start-Sleep -Seconds 300 }
